@@ -1,0 +1,5 @@
+pyqt5
+sqlalchemy
+pymysql
+bcrypt
+requests
