@@ -103,7 +103,7 @@ SQLALCHEMY_DIALECT_LOG_FILE = "SQLAlchemy Dialect.log"
 SQLALCHEMY_ORM_LOG_FILE = "SQLAlchemy ORM.log"
 
 MAX_LOG_SIZE_MB = DefaultSetting(settings=settings, group_name="Logging", name="Max Log Size Mb", value=5).initialize_setting().value
-MAX_LOG_COUNT = DefaultSetting(settings=settings, group_name="Logging", name="Max Log Count", value=3).initialize_setting().value
+MAX_LOG_COUNT = DefaultSetting(settings=settings, group_name="Logging", name="Max Log Count", value=10).initialize_setting().value
 LOG_LEVEL = DefaultSetting(settings=settings, group_name="Logging", name="Log Level", value=logging.INFO).initialize_setting().value
 if DEBUG:
     LOG_LEVEL = logging.DEBUG
