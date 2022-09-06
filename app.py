@@ -42,7 +42,7 @@ WIDTH, HEIGHT = 800, 1200
 class LabelDialog(QtWidgets.QDialog):
     def __init__(self, parent, part_number: str, label: models.BreakoutLabel=None):
         super().__init__(parent)
-        uic.loadUi('labeldialog.ui', self) # Load the .ui file
+        uic.loadUi('ui/labeldialog.ui', self) # Load the .ui file
         self.label = label
         if not self.label:
             self.setWindowTitle("Create Label")
@@ -97,7 +97,7 @@ class LoginDialog(QtWidgets.QDialog):
         super().__init__(parent)
         # ensure this window gets garbage-collected when closed
         # self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
-        uic.loadUi('logindialog.ui', self) # Load the .ui file
+        uic.loadUi('ui/logindialog.ui', self) # Load the .ui file
         self.setWindowTitle(f"{config.PROGRAM_NAME} Login")
         self.user = None # type: models.User
         self.connect_signals()
@@ -154,7 +154,7 @@ class LoginDialog(QtWidgets.QDialog):
 class Ui(QtWidgets.QMainWindow):
     def __init__(self):
         super(Ui, self).__init__() # Call the inherited classes __init__ method
-        uic.loadUi('mainwindow.ui', self) # Load the .ui file
+        uic.loadUi('ui/mainwindow.ui', self) # Load the .ui file
         self.resize(HEIGHT, WIDTH)
         self.login_dialog = None
         self.current_user = None
