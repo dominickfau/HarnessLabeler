@@ -224,7 +224,7 @@ class Ui(QtWidgets.QMainWindow):
         if self.current_user.id != 1:
             self.actionCreate_User.setEnabled(False)
             self.actionEdit_User.setEnabled(False)
-            self.actionImpart_Data.setEnabled(False)
+            self.actionImport_Data.setEnabled(False)
         
         if self.current_user.id == 1 and self.current_user.check_password("admin"):
             logger.warning("For security purposes the password for this user must be changed.")

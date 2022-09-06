@@ -195,7 +195,7 @@ class BreakoutLabel(Base, AuditMixin):
     """Represents a label for a harness breakout point."""
     __tablename__ = "label"
     __table_args__ = (
-        UniqueConstraint("part_number", "value", "sort_index"),
+        UniqueConstraint("part_number", "value", "sort_index", "rolling_label", name="UC_pn_value_sort_rolling"),
     )
 
     part_number = Column(String(100), index=True, nullable=False)
