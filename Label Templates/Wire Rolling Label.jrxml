@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports http://jasperreports.sourceforge.net/xsd/jasperreport.xsd" name="WireRollingLabel" pageWidth="288" pageHeight="72" columnWidth="288" leftMargin="0" rightMargin="0" topMargin="5" bottomMargin="5" uuid="0081e76f-58c4-45cc-84b4-267550690395">
+	<property name="ireport.zoom" value="2.732053821460282"/>
+	<property name="ireport.x" value="0"/>
+	<property name="ireport.y" value="0"/>
+	<parameter name="Part Number" class="java.lang.String"/>
+	<queryString>
+		<![CDATA[SELECT *
+FROM label
+WHERE part_number = $P{Part Number}
+AND rolling_label = 1]]>
+	</queryString>
+	<field name="id" class="java.lang.Integer">
+		<fieldDescription><![CDATA[]]></fieldDescription>
+	</field>
+	<field name="part_number" class="java.lang.String">
+		<fieldDescription><![CDATA[]]></fieldDescription>
+	</field>
+	<field name="value" class="java.lang.String">
+		<fieldDescription><![CDATA[]]></fieldDescription>
+	</field>
+	<field name="sort_index" class="java.lang.Integer">
+		<fieldDescription><![CDATA[]]></fieldDescription>
+	</field>
+	<detail>
+		<band height="62" splitType="Stretch">
+			<textField>
+				<reportElement x="216" y="0" width="72" height="31" uuid="ddcf8603-07ec-4870-a290-50ccef93d8bb"/>
+				<textElement textAlignment="Center" verticalAlignment="Middle">
+					<font size="12"/>
+				</textElement>
+				<textFieldExpression><![CDATA[$F{value}]]></textFieldExpression>
+			</textField>
+			<textField>
+				<reportElement x="216" y="31" width="72" height="31" uuid="a9dffb50-671f-4a6c-98f1-34d101a5326b"/>
+				<textElement textAlignment="Center" verticalAlignment="Middle">
+					<font size="8"/>
+				</textElement>
+				<textFieldExpression><![CDATA[$F{part_number}]]></textFieldExpression>
+			</textField>
+			<textField>
+				<reportElement x="0" y="0" width="72" height="62" uuid="2f1e3436-a6c3-466f-b2d3-e16cb9352b90"/>
+				<textElement textAlignment="Center" verticalAlignment="Middle">
+					<font size="8"/>
+				</textElement>
+				<textFieldExpression><![CDATA[$F{sort_index}]]></textFieldExpression>
+			</textField>
+		</band>
+	</detail>
+</jasperReport>
