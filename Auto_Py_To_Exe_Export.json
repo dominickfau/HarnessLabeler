@@ -72,6 +72,10 @@
   {
    "optionDest": "datas",
    "value": "C:/Users/1hack/Documents/Python/HarnessLabeler/ui;ui/"
+  },
+  {
+   "optionDest": "datas",
+   "value": "C:/Users/1hack/Documents/Python/HarnessLabeler/Label Templates;Label Templates/"
   }
  ],
  "nonPyinstallerOptions": {
