@@ -1,3 +1,4 @@
+from ast import Delete
 from datetime import datetime
 import sys
 import traceback
@@ -9,6 +10,7 @@ from types import TracebackType
 from typing import List, Optional, Type
 from PyQt5 import QtCore, QtWidgets, uic
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import SessionTransaction
 from harnesslabeler import config, models, updater
 from harnesslabeler.database import DBContext
 from harnesslabeler.customqwidgets import ResizableMessageBox
@@ -169,6 +171,7 @@ class Ui(QtWidgets.QMainWindow):
         self.actionLogin.triggered.connect(self.on_login)
         self.actionLogoff.triggered.connect(self.on_logoff)
         self.actionImport_Data.triggered.connect(self.import_data)
+        self.actionImport_Database.triggered.connect(self.import_backup)
         self.actionBackup_Database.triggered.connect(self.backup_database)
         self.actionChange_Password.triggered.connect(self.open_change_password_dialog)
 
@@ -225,6 +228,7 @@ class Ui(QtWidgets.QMainWindow):
             self.actionCreate_User.setEnabled(False)
             self.actionEdit_User.setEnabled(False)
             self.actionImport_Data.setEnabled(False)
+            self.actionImport_Database.setEnabled(False)
         
         if self.current_user.id == 1 and self.current_user.check_password("admin"):
             logger.warning("For security purposes the password for this user must be changed.")
@@ -513,7 +517,7 @@ class Ui(QtWidgets.QMainWindow):
         self.delete_pushButton.setEnabled(False)
     
     def get_import_file_path(self) -> str:
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open File", "/", "Supported Files (*.csv, *json)")
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open File", f"{config.DUMPS_FOLDER}", "Supported Files (*.csv, *json)")
         return file_path
     
     def import_data(self) -> None:
@@ -536,7 +540,7 @@ class Ui(QtWidgets.QMainWindow):
             for index, row in enumerate(csv_reader):
                 print(row)
     
-    def import_json(self, file_path: str) -> None:        
+    def import_json(self, file_path: str) -> None:
         with open(file_path, 'r') as f:
             data = json.load(f)
         
@@ -560,6 +564,256 @@ class Ui(QtWidgets.QMainWindow):
                     label.save(session, self.current_user)
             session.commit()
     
+    def import_backup(self) -> None:
+        """Imports data from database backup."""
+        result = QtWidgets.QMessageBox.warning(
+            self,
+            "Warning",
+            "Importing data will erase all data currently in the database.\n\nDo you want to continue?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            )
+        if result == QtWidgets.QMessageBox.StandardButton.No:
+            return
+
+        file_path = self.get_import_file_path()
+        if file_path == "":
+            return
+
+        logger.info(f"[DATABASE IMPORT] Importing data from file: '{file_path}'.")
+        
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+
+        logger.info(f"[DATABASE IMPORT] Data file START: \n{json.dumps(data, indent=4)}")
+        logger.info("[DATABASE IMPORT] Data file END.")
+
+        # Validate data.
+        logger.info(f"[DATABASE IMPORT] Validating data.")
+        required_sections = {
+            "labels": [
+                "id",
+                "part_number",
+                "value",
+                "sort_index",
+                "rolling_label",
+                "date_created",
+                "date_modified",
+                "modified_by_user_id",
+                "created_by_user_id"
+            ],
+            "users": [
+                "id",
+                "active",
+                "last_login_date",
+                "first_name",
+                "last_name",
+                "username",
+                "password_hash"
+            ],
+            "user_logins": [
+                "id",
+                "event_date",
+                "event_type",
+                "user_id"
+            ]
+        }
+        required_keys = [key for key in required_sections]
+
+        invalid_values = []
+
+        for key in required_keys:
+            if key not in data:
+                invalid_values.append(key)
+        
+        if invalid_values:
+            keys = ", ".join(invalid_values)
+            logger.error(f"[DATABASE IMPORT] Validation error. Missing required key(s): {keys}. Please check if data structure is like: \n{json.dumps(required_sections, indent=4)}")
+
+            msg = QtWidgets.QMessageBox()
+            msg.setWindowTitle("Data Import Error")
+            msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+            msg.setText(f"Validation error. Missing required key(s): {keys}.")
+            msg.setInformativeText(f"Please check if data structure is like: \n{json.dumps(required_sections, indent=4)}")
+            msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg.exec()
+            return
+        
+        invalid_values = []
+
+        for key in data:
+            required_keys = required_sections[key]
+            items = data[key] # type: List[dict]
+            
+            for item in items:
+                item_keys = item.keys()
+                for required_key in required_keys:
+                    if required_key in item_keys:
+                        continue
+                    logger.error(f"[DATABASE IMPORT] Validation error. Item: {item}. Missing required key: {required_key}.")
+                    msg = QtWidgets.QMessageBox()
+                    msg.setWindowTitle("Data Import Error")
+                    msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+                    msg.setText(f"Validation error. Item: {item}. Missing required key: {required_key}.")
+                    msg.setInformativeText(f"Please check if data structure is like: \n{json.dumps(required_sections, indent=4)}")
+                    msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+                    msg.exec()
+                    return
+        
+        logger.info("[DATABASE IMPORT] Validation complete.")
+
+        with DBContext() as session:
+            logger.info("[DATABASE IMPORT] Preparing to import data.")
+
+
+            # user_logins_savepoint = session.begin_nested() # type: SessionTransaction
+            
+            logger.info("[DATABASE IMPORT] Preparing 'user_logins'.")
+            try:
+                session.execute("SET foreign_key_checks = 0;")
+                session.execute("TRUNCATE `user_login`;")
+                for items in data["user_logins"]:
+                    id_ = items["id"]
+                    event_date = datetime.strptime(items["event_date"], config.DATETIME_FORMAT)
+                    event_type = items["event_type"]
+                    user_id = items["user_id"]
+
+                    user_login = models.UserLoginLog(
+                        id=id_,
+                        event_date=event_date,
+                        event_type=event_type,
+                        user_id=user_id
+                    )
+                    
+                    session.add(user_login)
+                    logger.info(f"[DATABASE IMPORT] Creating '{user_login}'.")
+                session.commit()
+            except Exception as error:
+                session.rollback()
+                session.execute("SET foreign_key_checks = 1;")
+                logger.critical(f"[DATABASE IMPORT] Error importing user_logins. Rolling back database.")
+                logger.exception(f"[DATABASE IMPORT] Error importing user_logins. Last user_login: {item}")
+                msg = QtWidgets.QMessageBox()
+                msg.setWindowTitle("Data Import Error")
+                msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+                msg.setText(f"Error importing user_logins. No data was imported. Last user_login: {item}")
+                msg.setInformativeText(f"Import will abort after closing this dialog. For more info check log file at '{config.LOG_FOLDER}'")
+                msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+                msg.exec()
+                return
+            
+
+            # lables_savepoint = session.begin_nested() # type: SessionTransaction
+            
+            logger.info("[DATABASE IMPORT] Preparing 'labels'.")
+            try:
+                session.execute("SET foreign_key_checks = 0;")
+                session.execute("TRUNCATE `label`;")
+                for items in data["labels"]:
+                    id_ = items["id"]
+                    part_number = items["part_number"]
+                    value = items["value"]
+                    sort_index = items["sort_index"]
+                    rolling_label = items["rolling_label"]
+                    date_created = datetime.strptime(items["date_created"], config.DATETIME_FORMAT)
+                    date_modified = datetime.strptime(items["date_modified"], config.DATETIME_FORMAT)
+                    modified_by_user_id = items["modified_by_user_id"]
+                    created_by_user_id = items["created_by_user_id"]
+
+                    label = models.BreakoutLabel(
+                        id=id_,
+                        part_number=part_number,
+                        value=value,
+                        sort_index=sort_index,
+                        rolling_label=rolling_label,
+                        date_created=date_created,
+                        date_modified=date_modified,
+                        modified_by_user_id=modified_by_user_id,
+                        created_by_user_id=created_by_user_id
+                    )
+                    
+                    session.add(label)
+                    logger.info(f"[DATABASE IMPORT] Creating '{label}'.")
+                session.commit()
+            except Exception as error:
+                session.rollback()
+                session.execute("SET foreign_key_checks = 1;")
+                logger.critical(f"[DATABASE IMPORT] Error importing labels. Rolling back database.")
+                logger.exception(f"[DATABASE IMPORT] Error importing labels. Last label: {item}")
+                msg = QtWidgets.QMessageBox()
+                msg.setWindowTitle("Data Import Error")
+                msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+                msg.setText(f"Error importing labels. No data was imported. Last label: {item}")
+                msg.setInformativeText(f"Import will abort after closing this dialog. For more info check log file at '{config.LOG_FOLDER}'")
+                msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+                msg.exec()
+                return
+            
+
+            logger.info("[DATABASE IMPORT] Preparing 'users'.")
+            
+            # users_savepoint = session.begin_nested() # type: SessionTransaction
+
+            try:
+                session.execute("SET foreign_key_checks = 0;")
+                session.execute("TRUNCATE `user`;")
+                for items in data["users"]:
+                    id_ = items["id"]
+                    active = items["active"]
+                    last_login_date = datetime.strptime(items["last_login_date"], config.DATETIME_FORMAT)
+                    first_name = items["first_name"]
+                    last_name = items["last_name"]
+                    username = items["username"]
+                    password_hash = items["password_hash"]
+
+                    user = models.User(
+                        id=id_,
+                        active=active,
+                        last_login_date=last_login_date,
+                        first_name=first_name,
+                        last_name=last_name,
+                        username=username,
+                        password_hash=password_hash
+                    )
+                    
+                    session.add(user)
+                    logger.info(f"[DATABASE IMPORT] Creating '{user}'.")
+                session.commit()
+            except Exception as error:
+                session.rollback()
+                session.execute("SET foreign_key_checks = 1;")
+                logger.critical(f"[DATABASE IMPORT] Error importing users. Rolling back database.")
+                logger.exception(f"[DATABASE IMPORT] Error importing users. Last user: {item}")
+                msg = QtWidgets.QMessageBox()
+                msg.setWindowTitle("Data Import Error")
+                msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+                msg.setText(f"Error importing users. No data was imported. Last user: {item}")
+                msg.setInformativeText(f"Import will abort after closing this dialog. For more info check log file at '{config.LOG_FOLDER}'")
+                msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+                msg.exec()
+                return
+
+            logger.info("[DATABASE IMPORT] Saving changes to database.")
+
+            logger.warning("[DATABASE IMPORT] Droping all data from database.")
+            
+            # end_savepoint = session.begin_nested() # type: SessionTransaction
+
+            # end_savepoint.commit()
+            # users_savepoint.commit()
+            # lables_savepoint.commit()
+            # user_logins_savepoint.commit()
+            session.commit()
+            session.execute("SET foreign_key_checks = 1;")
+            logger.info("[DATABASE IMPORT] Successfully imported all data.")
+            msg = QtWidgets.QMessageBox()
+            msg.setWindowTitle("Data Import")
+            msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
+            msg.setText("Successfully imported all data. For changes to take effect the program needs to be reopened.\n\nAfter closing this dialog the program will close.")
+            msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg.exec()
+            self.about_to_quit()
+            exit(0)
+
     def get_export_file_path(self) -> str:
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save As", f"{config.DUMPS_FOLDER}/Harness_Labeler_Database_Backup_{datetime.now().strftime('%m-%d-%Y')}", "Supported Files (*json)")
         if not file_path.endswith(".json"):
@@ -593,12 +847,12 @@ class Ui(QtWidgets.QMainWindow):
             logger.info(f"Saving {len(users)} users.")
 
             login_logs = session.query(models.UserLoginLog).all()
-            logger.info(f"Saving {len(login_logs)} login logs.")
+            logger.info(f"Saving {len(login_logs)} user logins.")
 
             data = {
                 "labels": [label.to_dict() for label in lables],
                 "users": [user.to_dict() for user in users],
-                "login_logs": [login_log.to_dict() for login_log in login_logs]
+                "user_logins": [login_log.to_dict() for login_log in login_logs]
             }
 
             with open(file_path, "w") as f:

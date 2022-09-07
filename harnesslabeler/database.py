@@ -26,6 +26,7 @@ class DBContext:
     """Context manager for talking to the database.
     """
     def __init__(self):
+        logger.debug("[DATABASE] Session created.")
         self.db = SessionLocal()
         self.db.expire_on_commit = False
 
@@ -34,6 +35,7 @@ class DBContext:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.db.close()
+        logger.debug("[DATABASE] Session closed.")
 
 
 def get_session() -> Session:

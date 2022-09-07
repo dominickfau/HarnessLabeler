@@ -291,6 +291,7 @@
     </property>
     <addaction name="actionImport_Data"/>
     <addaction name="actionBackup_Database"/>
+    <addaction name="actionImport_Database"/>
    </widget>
    <widget class="QMenu" name="menuUser_Admin">
     <property name="title">
@@ -351,6 +352,11 @@
   <action name="actionChange_Password">
    <property name="text">
     <string>Change Password</string>
+   </property>
+  </action>
+  <action name="actionImport_Database">
+   <property name="text">
+    <string>Import Database</string>
    </property>
   </action>
  </widget>
