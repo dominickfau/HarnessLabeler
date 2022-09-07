@@ -10,7 +10,7 @@ from types import TracebackType
 from typing import List, Optional, Type
 from PyQt5 import QtCore, QtWidgets, uic
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import SessionTransaction
+from sqlalchemy.orm import SessionTransaction, Session
 from harnesslabeler import config, models, updater
 from harnesslabeler.database import DBContext
 from harnesslabeler.customqwidgets import ResizableMessageBox
@@ -40,6 +40,324 @@ sys.excepthook = handle_exception
 WIDTH, HEIGHT = 800, 1200
 
 # TODO: Add user administration.
+class UserAdministrationDialog(QtWidgets.QDialog):
+    def __init__(self, current_user_id: int, session: Session, parent):
+        super().__init__(parent)
+        uic.loadUi('ui/useradministration.ui', self) # Load the .ui file
+        self.resize(HEIGHT, WIDTH)
+        self.selected_user = None # type: models.User
+        self.current_user_id = current_user_id
+        self.create_new_user = False
+        self.save_required = False
+        self.session = session
+
+        self.connect_signals()
+        self.reload_search_table()
+    
+    def connect_signals(self) -> None:
+        self.create_pushButton.clicked.connect(self.on_create_clicked)
+        self.save_pushButton.clicked.connect(self.on_save_clicked)
+        self.delete_pushButton.clicked.connect(self.on_delete_clicked)
+
+        self.search_first_name_lineEdit.editingFinished.connect(lambda x=self.search_first_name_lineEdit: self.clean_text_input(x))
+        self.search_last_name_lineEdit.editingFinished.connect(lambda x=self.search_last_name_lineEdit: self.clean_text_input(x))
+        self.search_username_lineEdit.editingFinished.connect(lambda x=self.search_username_lineEdit: self.clean_text_input(x))
+        self.search_pushButton.clicked.connect(self.reload_search_table)
+        self.search_show_all_checkBox.toggled.connect(self.reload_search_table)
+        self.search_view_pushButton.clicked.connect(self.on_view_clicked)
+        self.search_tableWidget.itemDoubleClicked.connect(self.on_view_clicked)
+
+        self.first_name_lineEdit.editingFinished.connect(lambda x=self.first_name_lineEdit: self.clean_text_input(x))
+        self.last_name_lineEdit.editingFinished.connect(lambda x=self.last_name_lineEdit: self.clean_text_input(x))
+        self.username_lineEdit.editingFinished.connect(lambda x=self.username_lineEdit: self.clean_text_input(x))
+        self.password_lineEdit.editingFinished.connect(lambda x=self.password_lineEdit: self.clean_text_input(x))
+
+        self.first_name_lineEdit.textChanged.connect(self.on_text_changed)
+        self.last_name_lineEdit.textChanged.connect(self.on_text_changed)
+        self.username_lineEdit.textChanged.connect(self.on_text_changed)
+        self.password_lineEdit.textChanged.connect(self.on_text_changed)
+        self.active_checkBox.toggled.connect(self.on_text_changed)
+    
+    def clean_text_input(self, widget: QtWidgets.QLineEdit):
+        """Strips text from widget."""
+        widget.setText(widget.text().strip())
+    
+    def on_text_changed(self) -> None:
+        self.save_required = True
+        self.save_pushButton.setEnabled(True)
+        if not self.create_new_user:
+            self.delete_pushButton.setEnabled(True)
+    
+    def get_selected_user_id(self) -> Optional[int]:
+        logger.info("[UserAdministrationDialog] Getting selected user id.")
+        items = self.search_tableWidget.selectedItems()
+        if items:
+            logger.debug(f"[UserAdministrationDialog] Selected user id: {items[0].text()}")
+            return int(items[0].text())
+        return None
+    
+    def clear_user_data(self) -> None:
+        logger.info("[UserAdministrationDialog] Clearing loaded user data.")
+        self.last_login_value_label.setText("")
+        self.first_name_lineEdit.setText("")
+        self.last_name_lineEdit.setText("")
+        self.username_lineEdit.setText("")
+        self.password_lineEdit.setText("")
+        self.active_checkBox.setChecked(True)
+        self.delete_pushButton.setEnabled(False)
+        self.save_pushButton.setEnabled(False)
+        self.save_required = False
+        self.create_new_user = False
+    
+    def reload_user_data(self) -> None:
+        if not self.selected_user:
+            return
+        
+        logger.info("[UserAdministrationDialog] Reloading user data.")
+
+        self.show_save_dialog()
+        self.clear_user_data()
+
+        self.delete_pushButton.setEnabled(True)
+        self.save_pushButton.setEnabled(True)
+
+        self.last_login_value_label.setText(self.selected_user.last_login_date_str)
+        self.first_name_lineEdit.setText(self.selected_user.first_name)
+        self.last_name_lineEdit.setText(self.selected_user.last_name)
+        self.username_lineEdit.setText(self.selected_user.username)
+        self.password_lineEdit.setText("")
+        self.active_checkBox.setChecked(self.selected_user.active)
+        self.save_required = False
+        
+    def on_view_clicked(self) -> None:
+        logger.debug("[UserAdministrationDialog] Search view button clicked.")
+        self.show_save_dialog()
+        user_id = self.get_selected_user_id()
+        if not user_id:
+            return
+        
+        self.selected_user = self.session.query(models.User).filter(models.User.id == user_id).first() # type: models.User
+        logger.debug(f"[UserAdministrationDialog] Selected user '{self.selected_user}'")
+        self.reload_user_data()
+
+    def on_create_clicked(self) -> None:
+        logger.info("[UserAdministrationDialog] Create user button clicked.")
+        self.show_save_dialog()
+
+        self.clear_user_data()
+        self.create_new_user = True
+        self.first_name_lineEdit.setFocus()
+    
+    def on_delete_clicked(self) -> None:
+        logger.info("[UserAdministrationDialog] Delete user button clicked.")
+        if not self.selected_user:
+            self.delete_pushButton.setEnabled(False)
+            self.save_pushButton.setEnabled(False)
+            return
+        
+        result = QtWidgets.QMessageBox.warning(
+            self,
+            "Delete",
+            f"Are you sure you want to delete user '{self.selected_user}'?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+
+        if result == QtWidgets.QMessageBox.StandardButton.No:
+            return
+        
+        current_user = self.session.query(models.User).filter(models.User.id == self.current_user_id).first() # type: models.User
+        if not current_user:
+            logger.error(f"Error deleting user '{self.selected_user}'. Could not find logged in user.")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Error",
+                f"Error deleting user '{self.selected_user}'. Could not find logged in user.",
+                QtWidgets.QMessageBox.StandardButton.Ok
+            )
+            return
+        
+        labels = self.session.query(models.BreakoutLabel).filter(models.BreakoutLabel.created_by_user_id == self.selected_user.id).all() # type: List[models.BreakoutLabel]
+        labels.extend(self.session.query(models.BreakoutLabel).filter(models.BreakoutLabel.modified_by_user_id == self.selected_user.id).all()) # type: List[models.BreakoutLabel]
+
+        if labels:
+            logger.error(f"Error deleting user '{self.selected_user}'. This user has created and or modifed labels. Deactivate user to hide.")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Error",
+                f"Error deleting user '{self.selected_user}'. This user has created and or modifed labels. Deactivate user to hide.",
+                QtWidgets.QMessageBox.StandardButton.Ok
+            )
+            return
+        
+        logs = self.session.query(models.UserLoginLog).filter(models.UserLoginLog.user_id == self.selected_user.id).all() # type: List[models.UserLoginLog]
+        logger.info(f"[UserAdministrationDialog] Deleting user {len(logs)} login logs.")
+        for log in logs:
+            self.session.delete(log)
+        self.session.commit()
+        self.session.delete(self.selected_user)
+        self.selected_user = None
+        self.session.commit()
+
+        self.save_pushButton.setEnabled(False)
+        self.delete_pushButton.setEnabled(False)
+        self.save_required = False
+        self.clear_user_data()
+        self.reload_search_table()
+        
+    def on_save_clicked(self) -> None:
+        logger.info("[UserAdministrationDialog] Save button clicked.")
+        self.save()
+        self.save_pushButton.setEnabled(False)
+    
+    def clear_search_table(self) -> None:
+        logger.debug("[UserAdministrationDialog] Clearing search table.")
+        self.search_tableWidget.clearContents()
+        self.search_tableWidget.setRowCount(0)
+    
+    def save(self) -> None:
+        if not self.selected_user and not self.create_new_user:
+            return
+        
+        first_name = self.first_name_lineEdit.text()
+        last_name = self.last_name_lineEdit.text()
+        username = self.username_lineEdit.text()
+        password = self.password_lineEdit.text()
+        active = self.active_checkBox.isChecked()
+        
+        if self.create_new_user:
+            if first_name == ""\
+                or last_name == ""\
+                or username == ""\
+                or password == "":
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Error",
+                    "All fields are required to create a new user.",
+                    QtWidgets.QMessageBox.StandardButton.Ok
+                    )
+                return
+            user = models.User(
+                first_name=first_name,
+                last_name=last_name,
+                username=username,
+                password=password,
+                active=active
+            )
+            try:
+                self.session.add(user)
+                self.session.commit()
+                self.create_new_user = False
+                logger.info(f"[UserAdministrationDialog] Created new user '{user}'.")
+            except Exception as error:
+                self.session.rollback()
+                logger.exception(f"Error creating new user '{user}'.")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Error",
+                    f"Error creating new user. Error: {error}",
+                    QtWidgets.QMessageBox.StandardButton.Ok
+                    )
+                return
+            self.selected_user = user
+        else:
+            logger.info(f"[UserAdministrationDialog] Updating user '{self.selected_user}'.")
+            self.selected_user.active = active
+            
+            if first_name != "":
+                self.selected_user.first_name = first_name
+            
+            if last_name != "":
+                self.selected_user.last_name = last_name
+            
+            if username != "":
+                self.selected_user.username = username
+            
+            if password != "":
+                self.selected_user.password = password
+
+            try:
+                self.session.commit()
+            except Exception as error:
+                self.session.rollback()
+                logger.exception(f"Error updating user '{self.selected_user}'.")
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Error",
+                    f"Error updating user. Error: {error}",
+                    QtWidgets.QMessageBox.StandardButton.Ok
+                    )
+                return
+
+        self.session.refresh(self.selected_user)
+        self.save_required = False
+        self.create_new_user = False
+        self.reload_user_data()
+        self.reload_search_table()
+
+    def show_save_dialog(self) -> None:
+        if not self.save_required:
+            return
+
+        logger.debug("[UserAdministrationDialog] Showing save dialog.")
+        msg = ResizableMessageBox()
+        msg.setWindowTitle("Save")
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        msg.setStandardButtons(
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+        msg.setText("Unsaved changes exist. Would you like to save?")
+        msg.exec()
+
+        if msg.exec() == QtWidgets.QMessageBox.StandardButton.Yes:
+            logger.debug("[UserAdministrationDialog] User wants to save.")
+            self.save()
+        else:
+            logger.debug("[UserAdministrationDialog] User does not want to save.")
+            self.save_required = False
+
+    def reload_search_table(self) -> None:
+        logger.info("[UserAdministrationDialog] Reloading search table.")
+        self.clear_search_table()
+
+        if not self.selected_user:
+            self.save_pushButton.setEnabled(False)
+            self.delete_pushButton.setEnabled(False)
+        else:
+            self.save_pushButton.setEnabled(True)
+            self.delete_pushButton.setEnabled(True)
+        
+        query = self.session.query(models.User)
+        first_name = self.search_first_name_lineEdit.text()
+        last_name = self.search_last_name_lineEdit.text()
+        username = self.search_username_lineEdit.text()
+        show_all = self.search_show_all_checkBox.isChecked()
+
+        if not show_all:
+            query = query.filter(models.User.active == True)
+
+        if first_name != "":
+            query = query.filter(models.User.first_name == first_name)
+        
+        if last_name != "":
+            query = query.filter(models.User.last_name == last_name)
+        
+        if username != "":
+            query = query.filter(models.User.username == username)
+        
+        users = query.all() # type: List[models.User]
+        logger.debug(f"[UserAdministrationDialog] Query: {query}")
+        logger.debug(f"[UserAdministrationDialog] Query Parameters: show_all: {show_all}, first_name: '{first_name}', last_name: '{last_name}', username: '{username}'.")
+        
+        for user in users:
+            self.search_tableWidget.insertRow(self.search_tableWidget.rowCount())
+            self.search_tableWidget.setItem(self.search_tableWidget.rowCount() - 1, 0, QtWidgets.QTableWidgetItem(str(user.id)))
+            self.search_tableWidget.setItem(self.search_tableWidget.rowCount() - 1, 1, QtWidgets.QTableWidgetItem(str(user.first_name)))
+            self.search_tableWidget.setItem(self.search_tableWidget.rowCount() - 1, 2, QtWidgets.QTableWidgetItem(str(user.last_name)))
+            self.search_tableWidget.setItem(self.search_tableWidget.rowCount() - 1, 3, QtWidgets.QTableWidgetItem(str(user.username)))
+            self.search_tableWidget.setItem(self.search_tableWidget.rowCount() - 1, 4, QtWidgets.QTableWidgetItem(str(user.last_login_date_str)))
+        
+        self.search_tableWidget.resizeColumnsToContents()
+        
 
 class LabelDialog(QtWidgets.QDialog):
     def __init__(self, parent, part_number: str, label: models.BreakoutLabel=None):
@@ -47,8 +365,10 @@ class LabelDialog(QtWidgets.QDialog):
         uic.loadUi('ui/labeldialog.ui', self) # Load the .ui file
         self.label = label
         if not self.label:
+            logger.info("[LabelDialog] Creating new label.")
             self.setWindowTitle("Create Label")
         else:
+            logger.info(f"[LabelDialog] Editing label: '{self.label}'")
             self.setWindowTitle("Edit Label")
 
         self.connect_signals()
@@ -69,10 +389,12 @@ class LabelDialog(QtWidgets.QDialog):
         self.cancel_pushButton.clicked.connect(self.on_cancel_button_clicked)
     
     def on_cancel_button_clicked(self) -> None:
+        logger.debug("[LabelDialog] Cancel button clicked.")
         self.reject()
         self.close()
 
     def on_save_button_clicked(self) -> None:
+        logger.debug("[LabelDialog] Save button clicked.")
         part_number = self.part_number_lineEdit.text().strip()
         label_value = self.label_value_lineEdit.text().strip()
         rolling_label = self.rolling_label_radioButton.isChecked()
@@ -109,46 +431,54 @@ class LoginDialog(QtWidgets.QDialog):
             self.username_lineEdit.setText(config.LAST_USERNAME.value)
             self.password_lineEdit.setFocus()
         
-    
     def connect_signals(self) -> None:
         self.exit_pushButton.clicked.connect(self.on_exit_button_clicked)
         self.username_lineEdit.returnPressed.connect(self.on_login_button_clicked)
         self.password_lineEdit.returnPressed.connect(self.on_login_button_clicked)
+        self.login_pushButton.clicked.connect(self.on_login_button_clicked)
     
     def on_exit_button_clicked(self) -> None:
+        logger.debug("[LoginDialog] Cancel button clicked.")
         self.reject()
         self.close_and_return()
 
     def on_login_button_clicked(self) -> None:
+        logger.debug("[LoginDialog] Login button clicked.")
         username = self.username_lineEdit.text().strip()
         password = self.password_lineEdit.text().strip()
         config.LAST_USERNAME.value = username
         config.LAST_USERNAME.save()
 
         if username == "" or password == "":
+            logger.warning("[LoginDialog] Username and Password required.")
             QtWidgets.QMessageBox.warning(self, "Login", "Username and Password are required.")
             return
 
+        logger.debug(f"[LoginDialog] Checking user creds. Username: '{username}'")
         with DBContext() as session:
             self.user = session.query(models.User).filter(models.User.username==username).first() # type: Optional[models.User]
             if not self.user or self.user and not self.user.check_password(password):
+                logger.warning("[LoginDialog] Username and/or Password invalid.")
                 QtWidgets.QMessageBox.warning(self, "Login", "Username and/or Password invalid.")
                 self.password_lineEdit.setFocus()
                 self.password_lineEdit.selectAll()
                 return
             
             if not self.user.active:
+                logger.warning(f"[LoginDialog] User '{self.user}' has been deactivated.")
                 QtWidgets.QMessageBox.warning(self, "Login", "This account has been deactivated. Please try another account.")
                 return
             
             session.expunge_all()
             self.accept()
+            logger.debug("[LoginDialog] Login success.")
             self.close_and_return()
     
     def result(self) -> models.User:
         return self.user
 
     def close_and_return(self):
+        logger.info("[LoginDialog] Closing and returning.")
         self.close()
         self.parent().show()
 
@@ -174,6 +504,7 @@ class Ui(QtWidgets.QMainWindow):
         self.actionImport_Database.triggered.connect(self.import_backup)
         self.actionBackup_Database.triggered.connect(self.backup_database)
         self.actionChange_Password.triggered.connect(self.open_change_password_dialog)
+        self.actionUser_Administration.triggered.connect(self.open_user_administration_dialog)
 
         self.search_pushButton.clicked.connect(self.on_search_button_clicked)
         self.show_all_radioButton.toggled.connect(self.reload_label_table)
@@ -187,6 +518,7 @@ class Ui(QtWidgets.QMainWindow):
         self.part_number_lineEdit.editingFinished.connect(lambda x=self.part_number_lineEdit: self.clean_text_input(x))
         self.part_number_lineEdit.returnPressed.connect(self.on_search_button_clicked)
         self.tableWidget.itemSelectionChanged.connect(self.on_label_table_item_selection_changed)
+        self.tableWidget.itemDoubleClicked.connect(self.on_edit_button_clicked)
         
     def about_to_quit(self) -> None:
         logger.setLevel(logging.INFO)
@@ -229,6 +561,17 @@ class Ui(QtWidgets.QMainWindow):
             self.actionEdit_User.setEnabled(False)
             self.actionImport_Data.setEnabled(False)
             self.actionImport_Database.setEnabled(False)
+            self.actionCreate_User.setEnabled(False)
+            self.actionEdit_User.setEnabled(False)
+            self.actionUser_Administration.setEnabled(False)
+        else:
+            self.actionCreate_User.setEnabled(True)
+            self.actionEdit_User.setEnabled(True)
+            self.actionImport_Data.setEnabled(True)
+            self.actionImport_Database.setEnabled(True)
+            self.actionCreate_User.setEnabled(True)
+            self.actionEdit_User.setEnabled(True)
+            self.actionUser_Administration.setEnabled(True)
         
         if self.current_user.id == 1 and self.current_user.check_password("admin"):
             logger.warning("For security purposes the password for this user must be changed.")
@@ -250,6 +593,14 @@ class Ui(QtWidgets.QMainWindow):
         self.update_window_title()
         if not about_to_close:
             self.open_login_window()
+    
+    def open_user_administration_dialog(self) -> None:
+        logger.info("Opening User Administration Dialog.")
+        with DBContext() as session:
+            dialog = UserAdministrationDialog(current_user_id=self.current_user.id, session=session, parent=self)
+            dialog.exec()
+        
+        return
         
     def open_change_password_dialog(self) -> None:
         if not self.current_user:
@@ -315,6 +666,7 @@ class Ui(QtWidgets.QMainWindow):
             return
     
     def open_login_window(self) -> None:
+        logger.info("Showing login window.")
         self.hide()
         self.login_dialog = LoginDialog(self)
         result = self.login_dialog.exec()
@@ -335,7 +687,7 @@ class Ui(QtWidgets.QMainWindow):
         widget.setText(widget.text().strip())
     
     def clear_label_table(self) -> None:
-        logger.info("[TABLE] Clearing label table.")
+        logger.debug("[TABLE] Clearing label table.")
         self.tableWidget.clearContents()
         self.tableWidget.setRowCount(0)
     
@@ -344,9 +696,11 @@ class Ui(QtWidgets.QMainWindow):
         self.delete_pushButton.setEnabled(True)
 
     def get_selected_labels(self) -> Optional[List[QtWidgets.QTableWidgetItem]]:
+        logger.debug("Getting selected table item.")
         return self.tableWidget.selectedItems()
     
     def on_new_button_clicked(self) -> None:
+        logger.info("New label button clicked.")
         part_number = self.part_number_lineEdit.text()
         self.label_dialog = LabelDialog(self, part_number=part_number)
         result = self.label_dialog.exec()
@@ -373,6 +727,7 @@ class Ui(QtWidgets.QMainWindow):
             self.reload_label_table()
 
     def on_edit_button_clicked(self) -> None:
+        logger.info("Edit button clicked.")
         items = self.get_selected_labels()
         try:
             item_id = int(items[0].text())
@@ -421,6 +776,7 @@ class Ui(QtWidgets.QMainWindow):
             self.reload_label_table()
     
     def on_delete_button_clicked(self) -> None:
+        logger.info("Delete button clicked.")
         items = self.get_selected_labels()
         try:
             item_id = int(items[0].text())
@@ -584,8 +940,8 @@ class Ui(QtWidgets.QMainWindow):
         with open(file_path, 'r') as f:
             data = json.load(f)
 
-        logger.info(f"[DATABASE IMPORT] Data file START: \n{json.dumps(data, indent=4)}")
-        logger.info("[DATABASE IMPORT] Data file END.")
+        logger.debug(f"[DATABASE IMPORT] Data file START: \n{json.dumps(data, indent=4)}")
+        logger.debug("[DATABASE IMPORT] Data file END.")
 
         # Validate data.
         logger.info(f"[DATABASE IMPORT] Validating data.")
@@ -661,16 +1017,20 @@ class Ui(QtWidgets.QMainWindow):
         
         logger.info("[DATABASE IMPORT] Validation complete.")
 
-        with DBContext() as session:
-            logger.info("[DATABASE IMPORT] Preparing to import data.")
+        logger.info("[DATABASE IMPORT] Auto creating backup.")
+        self.export_database(
+            file_path=f"{config.DUMPS_FOLDER}/AUTO_Harness_Labeler_Database_Backup_{datetime.now().strftime(config.DATETIME_FORMAT_FILE_SAFE)}.json"
+            )
+        logger.info("[DATABASE IMPORT] Finished creating backup.")
 
+        with DBContext(dissable_foreign_key_checks=True) as session:
+            logger.info("[DATABASE IMPORT] Preparing to import data.")
 
             # user_logins_savepoint = session.begin_nested() # type: SessionTransaction
             
             logger.info("[DATABASE IMPORT] Preparing 'user_logins'.")
             try:
-                session.execute("SET foreign_key_checks = 0;")
-                session.execute("TRUNCATE `user_login`;")
+                session.execute(f"TRUNCATE {models.UserLoginLog.__tablename__};")
                 for items in data["user_logins"]:
                     id_ = items["id"]
                     event_date = datetime.strptime(items["event_date"], config.DATETIME_FORMAT)
@@ -689,7 +1049,6 @@ class Ui(QtWidgets.QMainWindow):
                 session.commit()
             except Exception as error:
                 session.rollback()
-                session.execute("SET foreign_key_checks = 1;")
                 logger.critical(f"[DATABASE IMPORT] Error importing user_logins. Rolling back database.")
                 logger.exception(f"[DATABASE IMPORT] Error importing user_logins. Last user_login: {item}")
                 msg = QtWidgets.QMessageBox()
@@ -706,8 +1065,7 @@ class Ui(QtWidgets.QMainWindow):
             
             logger.info("[DATABASE IMPORT] Preparing 'labels'.")
             try:
-                session.execute("SET foreign_key_checks = 0;")
-                session.execute("TRUNCATE `label`;")
+                session.execute(f"TRUNCATE {models.BreakoutLabel.__tablename__};")
                 for items in data["labels"]:
                     id_ = items["id"]
                     part_number = items["part_number"]
@@ -736,7 +1094,6 @@ class Ui(QtWidgets.QMainWindow):
                 session.commit()
             except Exception as error:
                 session.rollback()
-                session.execute("SET foreign_key_checks = 1;")
                 logger.critical(f"[DATABASE IMPORT] Error importing labels. Rolling back database.")
                 logger.exception(f"[DATABASE IMPORT] Error importing labels. Last label: {item}")
                 msg = QtWidgets.QMessageBox()
@@ -754,8 +1111,7 @@ class Ui(QtWidgets.QMainWindow):
             # users_savepoint = session.begin_nested() # type: SessionTransaction
 
             try:
-                session.execute("SET foreign_key_checks = 0;")
-                session.execute("TRUNCATE `user`;")
+                session.execute(f"TRUNCATE {models.User.__tablename__};")
                 for items in data["users"]:
                     id_ = items["id"]
                     active = items["active"]
@@ -780,7 +1136,6 @@ class Ui(QtWidgets.QMainWindow):
                 session.commit()
             except Exception as error:
                 session.rollback()
-                session.execute("SET foreign_key_checks = 1;")
                 logger.critical(f"[DATABASE IMPORT] Error importing users. Rolling back database.")
                 logger.exception(f"[DATABASE IMPORT] Error importing users. Last user: {item}")
                 msg = QtWidgets.QMessageBox()
@@ -803,7 +1158,6 @@ class Ui(QtWidgets.QMainWindow):
             # lables_savepoint.commit()
             # user_logins_savepoint.commit()
             session.commit()
-            session.execute("SET foreign_key_checks = 1;")
             logger.info("[DATABASE IMPORT] Successfully imported all data.")
             msg = QtWidgets.QMessageBox()
             msg.setWindowTitle("Data Import")
@@ -811,11 +1165,11 @@ class Ui(QtWidgets.QMainWindow):
             msg.setText("Successfully imported all data. For changes to take effect the program needs to be reopened.\n\nAfter closing this dialog the program will close.")
             msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
             msg.exec()
-            self.about_to_quit()
-            exit(0)
+        self.about_to_quit()
+        exit(0)
 
     def get_export_file_path(self) -> str:
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save As", f"{config.DUMPS_FOLDER}/Harness_Labeler_Database_Backup_{datetime.now().strftime('%m-%d-%Y')}", "Supported Files (*json)")
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save As", f"{config.DUMPS_FOLDER}/Harness_Labeler_Database_Backup_{datetime.now().strftime(config.DATETIME_FORMAT_FILE_SAFE)}", "Supported Files (*json)")
         if not file_path.endswith(".json"):
             file_path = file_path + ".json"
         return file_path
@@ -828,11 +1182,9 @@ class Ui(QtWidgets.QMainWindow):
         logger.info("Creating database backup.")
         self.export_database(file_path)
         QtWidgets.QMessageBox.information(self, "Database Backup", "Database backup saved.")
-    
-    # TODO: Add database import.
 
     def export_database(self, file_path: str) -> None:
-        logger.info("Starting database backup.")
+        logger.info(f"Starting database backup. File: '{file_path}'")
         with DBContext() as session:
 
             lables = session.query(models.BreakoutLabel)\
@@ -857,6 +1209,7 @@ class Ui(QtWidgets.QMainWindow):
 
             with open(file_path, "w") as f:
                 json.dump(data, f, indent=4)
+
 
 def show_new_release_dialog(version: str, html_url: str):
     dialog = QtWidgets.QMessageBox()

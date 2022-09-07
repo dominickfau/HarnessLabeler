@@ -297,8 +297,7 @@
     <property name="title">
      <string>User Admin</string>
     </property>
-    <addaction name="actionCreate_User"/>
-    <addaction name="actionEdit_User"/>
+    <addaction name="actionUser_Administration"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuData"/>
@@ -341,7 +340,7 @@
   </action>
   <action name="actionCreate_User">
    <property name="text">
-    <string>Create User</string>
+    <string>User Administration</string>
    </property>
   </action>
   <action name="actionEdit_User">
@@ -357,6 +356,11 @@
   <action name="actionImport_Database">
    <property name="text">
     <string>Import Database</string>
+   </property>
+  </action>
+  <action name="actionUser_Administration">
+   <property name="text">
+    <string>User Administration</string>
    </property>
   </action>
  </widget>

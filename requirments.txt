@@ -4,3 +4,4 @@ pymysql
 bcrypt
 requests
 cryptography
+auto-py-to-exe

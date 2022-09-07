@@ -1,4 +1,5 @@
 import os
+import logging
 from logging.config import dictConfig
 from .config import LOG_FOLDER, LOG_LEVEL, MAX_LOG_COUNT, MAX_LOG_SIZE_MB, LOG_FILE
 

@@ -107,7 +107,7 @@ class User(Base):
     
     @property
     def last_login_date_str(self) -> str:
-        return self.last_login_date.strftime(config.DATETIME_FORMAT)
+        return self.last_login_date.strftime(config.DATETIME_FORMAT) if self.last_login_date else "Never"
     
     @property
     def password(self) -> None:
@@ -322,7 +322,7 @@ def force_recreate():
 
 
 def create_database():
-    logger.info("[SYSTEM] Creating database...")
+    logger.info(f"[SYSTEM] Creating database '{config.SCHEMA_NAME}'...")
     if config.DATABASE_URL_WITHOUT_SCHEMA.startswith("mysql"):
         temp_engine = create_engine(config.DATABASE_URL_WITHOUT_SCHEMA)
         temp_engine.execute(config.SCHEMA_CREATE_STATEMENT)

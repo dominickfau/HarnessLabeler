@@ -84,6 +84,7 @@ settings = QSettings(COMPANY_NAME, PROGRAM_NAME)
 
 # Program settings
 DATETIME_FORMAT = "%m-%d-%Y %H:%M"
+DATETIME_FORMAT_FILE_SAFE = '%m-%d-%Y_%H-%M-%S'
 DATE_FORMAT = "%m-%d-%Y"
 ENCODING_STR = "utf-8"
 LAST_USERNAME = DefaultSetting(settings=settings, name="Last Username", value="").initialize_setting()
@@ -104,9 +105,11 @@ SQLALCHEMY_ORM_LOG_FILE = "SQLAlchemy ORM.log"
 
 MAX_LOG_SIZE_MB = DefaultSetting(settings=settings, group_name="Logging", name="Max Log Size Mb", value=5).initialize_setting().value
 MAX_LOG_COUNT = DefaultSetting(settings=settings, group_name="Logging", name="Max Log Count", value=10).initialize_setting().value
-LOG_LEVEL = DefaultSetting(settings=settings, group_name="Logging", name="Log Level", value=logging.INFO).initialize_setting().value
+
 if DEBUG:
     LOG_LEVEL = logging.DEBUG
+else:
+    LOG_LEVEL = DefaultSetting(settings=settings, group_name="Logging", name="Log Level", value=logging.INFO).initialize_setting().value
 
 
 # Database Settings
