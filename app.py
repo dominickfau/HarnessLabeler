@@ -1211,16 +1211,26 @@ class Ui(QtWidgets.QMainWindow):
                 json.dump(data, f, indent=4)
 
 
-def show_new_release_dialog(version: str, html_url: str):
+def show_new_release_dialog(version: str, html_url: str) -> bool:
+    """Shows new release message. User can choose to open webbrowser
+        and download.
+
+    Args:
+        version (str): The new version number string.
+        html_url (str): The full url to the new version.
+
+    Returns:
+        bool: Returns True if user wants to download new version.
+    """
     dialog = QtWidgets.QMessageBox()
     dialog.setWindowTitle("New release available")
-    dialog.setText(f"New release available: {version}")
+    dialog.setText(f"New release available: '{version}'. For compatibility this update must be downloaded before continuing.")
     dialog.setInformativeText("Would you like to open the download page?")
     dialog.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
     dialog.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
     dialog.setIcon(QtWidgets.QMessageBox.Icon.Information)
     if dialog.exec() == QtWidgets.QMessageBox.StandardButton.No:
-        return
+        return False
 
     # Open an internet browser to download the release
     try:
@@ -1228,6 +1238,8 @@ def show_new_release_dialog(version: str, html_url: str):
     except Exception as e:
         logger.exception(f"Failed to open browser to download release.")
         QtWidgets.QMessageBox.critical(None, "Error", f"Could not open browser: {e}")
+    
+    return True
 
 
 def prompt_user(skip_check: bool=False):
@@ -1317,7 +1329,12 @@ if __name__ == "__main__":
 
     newer, version, url = updater.check_for_updates()
     if newer:
-        show_new_release_dialog(version, url)
+        if not show_new_release_dialog(version, url):
+            logger.warning(f"[UPDATE] A newer version '{version}' is available. User does not want to download.")
+        else:
+            logger.warning(f"[UPDATE] A newer version '{version}' is available.")
+        logger.error(f"[UPDATE] Can not proceed with program execution. Please download new version '{version}', from '{url}'.")
+        exit(0)
 
     prompt_user()
 
