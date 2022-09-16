@@ -1,11 +1,13 @@
-from ast import Delete
 from datetime import datetime
+import string
 import sys
 import traceback
 import logging
 import csv
 import json
 import webbrowser
+import os
+import clipboard
 from types import TracebackType
 from typing import List, Optional, Type
 from PyQt5 import QtCore, QtWidgets, uic
@@ -1243,85 +1245,129 @@ def show_new_release_dialog(version: str, html_url: str) -> bool:
 
 
 def prompt_user(skip_check: bool=False):
-        if not skip_check and not (config.DATABASE_USER.value == ""\
+    """Shows a dialog form informing the user that
+    required registry keys are missing and or blank.
+    Returns immediately if non if the required keys
+    are blank or missing.
+
+    Args:
+        skip_check (bool, optional): Force the dialog to be
+        shown, even if all keys are populated in the registry. Defaults to False.
+    """
+    if not skip_check and not (config.DATABASE_USER.value == ""\
+        or config.DATABASE_PASSWORD.value == ""\
+        or config.DATABASE_HOST.value == ""\
+        or config.DATABASE_PORT.value == ""):
+        return
+
+    logger.warning("Missing required registry key values. Prompting user to enter data.")
+    
+    dialog = QtWidgets.QDialog()
+    dialog.setWindowTitle("Missing Required Data")
+    v_layout = QtWidgets.QVBoxLayout()
+    dialog.setLayout(v_layout)
+    username_lineEdit = QtWidgets.QLineEdit()
+    password_lineEdit = QtWidgets.QLineEdit()
+    host_lineEdit = QtWidgets.QLineEdit()
+    port_spinBox = QtWidgets.QSpinBox()
+
+    password_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.PasswordEchoOnEdit)
+    port_spinBox.setButtonSymbols(QtWidgets.QSpinBox.ButtonSymbols.NoButtons)
+    port_spinBox.setMinimum(1024)
+    port_spinBox.setMaximum(65535)
+
+    username_lineEdit.editingFinished.connect(lambda: username_lineEdit.setText(username_lineEdit.text().strip()))
+    password_lineEdit.editingFinished.connect(lambda: password_lineEdit.setText(password_lineEdit.text().strip()))
+    host_lineEdit.editingFinished.connect(lambda: host_lineEdit.setText(host_lineEdit.text().strip()))
+
+    info_label = QtWidgets.QLabel("Please fill in the missing MySQL database authentication info.")
+    hive_label = QtWidgets.QLabel(f"All settings are stored in the registry at: '{config.DATABASE_USER.base_hive_location}'")
+
+    v_layout.addWidget(info_label)
+    hive_layout = QtWidgets.QHBoxLayout()
+    hive_layout.addWidget(hive_label)
+    v_layout.addLayout(hive_layout)
+    form_layout = QtWidgets.QFormLayout()
+    form_layout.addRow(QtWidgets.QLabel("Username:"), username_lineEdit)
+    form_layout.addRow(QtWidgets.QLabel("Password:"), password_lineEdit)
+    form_layout.addRow(QtWidgets.QLabel("Host:"), host_lineEdit)
+    form_layout.addRow(QtWidgets.QLabel("Port:"), port_spinBox)
+    v_layout.addSpacing(10)
+    v_layout.addLayout(form_layout)
+    button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Save | QtWidgets.QDialogButtonBox.StandardButton.Close)
+    copy_button = QtWidgets.QPushButton("Copy Hive Location")
+    open_registry_button = QtWidgets.QPushButton("Open Registry Editor")
+    h_layout = QtWidgets.QHBoxLayout()
+    h_layout.addWidget(copy_button)
+    h_layout.addWidget(open_registry_button)
+    h_layout.addStretch(1)
+    h_layout.addWidget(button_box)
+    v_layout.addLayout(h_layout)
+
+    username_lineEdit.setText(config.DATABASE_USER.value)
+    password_lineEdit.setText(config.DATABASE_PASSWORD.value)
+    host_lineEdit.setText(config.DATABASE_HOST.value)
+    port_spinBox.setValue(int(config.DATABASE_PORT.value))
+
+    def on_accept():
+        config.DATABASE_USER.value = username_lineEdit.text()
+        config.DATABASE_PASSWORD.value = password_lineEdit.text()
+        config.DATABASE_HOST.value = host_lineEdit.text()
+        config.DATABASE_PORT.value = str(port_spinBox.text())
+
+        config.DATABASE_USER.save()
+        config.DATABASE_PASSWORD.save()
+        config.DATABASE_HOST.save()
+        config.DATABASE_PORT.save()
+
+        if config.DATABASE_USER.value == ""\
             or config.DATABASE_PASSWORD.value == ""\
             or config.DATABASE_HOST.value == ""\
-            or config.DATABASE_PORT.value == ""):
+            or config.DATABASE_PORT.value == "":
+            QtWidgets.QMessageBox.warning(dialog, "Warning", "Please fill in all blank fields.")
             return
 
-        logger.warning("Missing required registry key values. Prompting user to enter data.")
-        
-        dialog = QtWidgets.QDialog()
-        dialog.setWindowTitle("Missing Required Data")
-        v_layout = QtWidgets.QVBoxLayout()
-        dialog.setLayout(v_layout)
-        username_lineEdit = QtWidgets.QLineEdit()
-        password_lineEdit = QtWidgets.QLineEdit()
-        host_lineEdit = QtWidgets.QLineEdit()
-        port_spinBox = QtWidgets.QSpinBox()
+        dialog.accept()
 
-        password_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.PasswordEchoOnEdit)
-        port_spinBox.setButtonSymbols(QtWidgets.QSpinBox.ButtonSymbols.NoButtons)
-        port_spinBox.setMinimum(1024)
-        port_spinBox.setMaximum(65535)
+    def on_reject():
+        dialog.reject()
+    
+    def copy_clipboard():
+        string = 'Computer\\' + config.DATABASE_USER.base_hive_location
+        string = string.replace('/', '\\')
+        clipboard.copy(string)
 
-        username_lineEdit.editingFinished.connect(lambda: username_lineEdit.setText(username_lineEdit.text().strip()))
-        password_lineEdit.editingFinished.connect(lambda: password_lineEdit.setText(password_lineEdit.text().strip()))
-        host_lineEdit.editingFinished.connect(lambda: host_lineEdit.setText(host_lineEdit.text().strip()))
+        msg = QtWidgets.QMessageBox()
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        msg.setWindowTitle("Info")
+        msg.setText("Hive location coppied to clip board.")
+        msg.exec()
 
-        info_label = QtWidgets.QLabel(f"Please fill in the missing MySQL database authentication info.\n\nAll settings are stored in the registry at: '{config.DATABASE_USER.base_hive_location}'")
+    def open_hive_location():
+        msg = QtWidgets.QMessageBox()
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        msg.setWindowTitle("Info")
+        msg.setText("After closing this dialog, accept UAC to open registry. Select all text in URL bar, starts with 'Computer\\', paste clipboard contents, then press enter key. This will take you to the location for all program settings.")
+        msg.setInformativeText("Note: Admin privileges are required to continue.")
+        msg.exec()
+        command = "regedit"
+        os.system(command)
 
-        v_layout.addWidget(info_label)
-        form_layout = QtWidgets.QFormLayout()
-        form_layout.addRow(QtWidgets.QLabel("Username:"), username_lineEdit)
-        form_layout.addRow(QtWidgets.QLabel("Password:"), password_lineEdit)
-        form_layout.addRow(QtWidgets.QLabel("Host:"), host_lineEdit)
-        form_layout.addRow(QtWidgets.QLabel("Port:"), port_spinBox)
-        v_layout.addSpacing(10)
-        v_layout.addLayout(form_layout)
-        button_box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Save | QtWidgets.QDialogButtonBox.StandardButton.Close)
-        v_layout.addWidget(button_box)
+    copy_button.clicked.connect(copy_clipboard)
+    open_registry_button.clicked.connect(open_hive_location)
 
-        username_lineEdit.setText(config.DATABASE_USER.value)
-        password_lineEdit.setText(config.DATABASE_PASSWORD.value)
-        host_lineEdit.setText(config.DATABASE_HOST.value)
-        port_spinBox.setValue(int(config.DATABASE_PORT.value))
+    button_box.accepted.connect(on_accept)
+    button_box.rejected.connect(on_reject)
 
-        def on_accept():
-            config.DATABASE_USER.value = username_lineEdit.text()
-            config.DATABASE_PASSWORD.value = password_lineEdit.text()
-            config.DATABASE_HOST.value = host_lineEdit.text()
-            config.DATABASE_PORT.value = str(port_spinBox.text())
-
-            config.DATABASE_USER.save()
-            config.DATABASE_PASSWORD.save()
-            config.DATABASE_HOST.save()
-            config.DATABASE_PORT.save()
-
-            if config.DATABASE_USER.value == ""\
-                or config.DATABASE_PASSWORD.value == ""\
-                or config.DATABASE_HOST.value == ""\
-                or config.DATABASE_PORT.value == "":
-                QtWidgets.QMessageBox.warning(dialog, "Warning", "Please fill in all blank fields.")
-                return
-
-            dialog.accept()
-
-        def on_reject():
-            dialog.reject()
-
-        button_box.accepted.connect(on_accept)
-        button_box.rejected.connect(on_reject)
-
-        result = dialog.exec()
-        if result == 0:
-            logger.warning("User did not set missing required database info. The program can not continue.")
-            QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info. The program can not continue.")
-            exit(0)
-        else:
-            logger.info("Missing required database info saved. Application restart required to apply changes.")
-            QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info saved. Application restart required to apply changes.\n\nProgram will close after this dialog closes.")
-            exit(0)
+    result = dialog.exec()
+    if result == 0:
+        logger.warning("User did not set missing required database info. The program can not continue.")
+        QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info. The program can not continue.")
+        exit(0)
+    else:
+        logger.info("Missing required database info saved. Application restart required to apply changes.")
+        QtWidgets.QMessageBox.warning(dialog, "Error", "Missing required database info saved. Application restart required to apply changes.\n\nProgram will close after this dialog closes.")
+        exit(0)
 
 
 if __name__ == "__main__":
@@ -1342,7 +1388,12 @@ if __name__ == "__main__":
         models.create_database()
     except Exception as error:
         logger.exception("Could not create database.")
-        QtWidgets.QMessageBox.warning(None, "Error", "There was an issue connecting to the database. Check database authentication settings.")
+        msg = ResizableMessageBox()
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Error")
+        msg.setText("There was an issue connecting to the database. Check database authentication settings.")
+        msg.setInformativeText(f"Error: {error}")
+        msg.exec()
         prompt_user(skip_check=True)
         exit(0)
         
