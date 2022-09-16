@@ -8,7 +8,8 @@
 		<![CDATA[SELECT *
 FROM label
 WHERE part_number = $P{Part Number}
-AND rolling_label = 1]]>
+AND rolling_label = 1
+ORDER BY sort_index]]>
 	</queryString>
 	<field name="id" class="java.lang.Integer">
 		<fieldDescription><![CDATA[]]></fieldDescription>
